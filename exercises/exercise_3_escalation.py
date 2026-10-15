@@ -34,7 +34,7 @@ from common.schemas import (
 )
 
 
-from exercises.review_helpers import REVIEW_PROMPT, approval_payload, validate_choice
+from exercises.exercise_1_confidence import REVIEW_PROMPT, approval_payload, validate_choice
 
 console = Console()
 

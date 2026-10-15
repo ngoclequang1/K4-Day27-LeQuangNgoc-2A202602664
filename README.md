@@ -1,6 +1,6 @@
 # Day27 — Track 3: HITL PR Review Agent
 
-> **Implementation completed:** exercises 1?5 are implemented. See [LAB_REPORT.md](LAB_REPORT.md) for changes, verification results, and Windows commands.
+> **Implementation completed:** exercises 1-5 are implemented. Live checks: PR #1 routes to human approval (65-68%); PR #2 escalates (55%). SQLite resume, audit, and Streamlit tests pass.
 > Escalation now ends with a final human approval before posting. Edit posts the replacement text entered by the reviewer.
 > The remaining text describes the original lab assignment and scaffold.
 

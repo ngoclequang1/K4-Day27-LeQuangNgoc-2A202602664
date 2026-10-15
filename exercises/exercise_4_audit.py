@@ -27,7 +27,7 @@ from common.llm import get_llm
 from common.schemas import AuditEntry, PRAnalysis, ReviewState, risk_level_for
 from exercises.exercise_1_confidence import node_route as route_decision
 from exercises.exercise_3_escalation import handle_interrupt, _render_comment_body
-from exercises.review_helpers import REVIEW_PROMPT, approval_payload, validate_choice
+from exercises.exercise_1_confidence import REVIEW_PROMPT, approval_payload, validate_choice
 
 AGENT_ID = "pr-review-agent@v0.1"
 
