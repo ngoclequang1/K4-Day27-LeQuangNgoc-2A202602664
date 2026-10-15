@@ -1,5 +1,9 @@
 # Day27 — Track 3: HITL PR Review Agent
 
+> **Implementation completed:** exercises 1?5 are implemented. See [LAB_REPORT.md](LAB_REPORT.md) for changes, verification results, and Windows commands.
+> Escalation now ends with a final human approval before posting. Edit posts the replacement text entered by the reviewer.
+> The remaining text describes the original lab assignment and scaffold.
+
 A 2-hour lab that builds a human-in-the-loop pull-request review agent in **LangGraph**, end-to-end.
 
 > 1. Agent reads a PR, analyzes code changes, proposes review comments.

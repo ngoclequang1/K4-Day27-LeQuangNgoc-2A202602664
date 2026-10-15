@@ -1,10 +1,18 @@
 """Exercise 3 — Escalation branch with reviewer Q&A.
 
-When confidence < 60%, the agent doesn't ask approve/reject — it asks specific
+When confidence < 58%, the agent doesn't ask approve/reject — it asks specific
 clarifying questions and then synthesizes a refined review from the answers.
 """
 
 from __future__ import annotations
+
+# Support both `python -m exercises...` and the README script commands.
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+from pathlib import Path
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import argparse
 import uuid
@@ -26,6 +34,8 @@ from common.schemas import (
 )
 
 
+from exercises.review_helpers import REVIEW_PROMPT, approval_payload, validate_choice
+
 console = Console()
 
 
@@ -43,9 +53,7 @@ def node_analyze(state):
     with console.status("[dim]LLM reviewing the diff...[/dim]"):
         analysis = llm.invoke([
             {"role": "system", "content": (
-                "Senior reviewer. Structured output. "
-                # TODO: add an instruction: if confidence < 60%, populate escalation_questions
-                # with 2–4 specific, context-rich questions (reference which file/section in the diff).
+                REVIEW_PROMPT
             )},
             {"role": "user", "content": f"Title: {state['pr_title']}\nDiff:\n{state['pr_diff']}"},
         ])
@@ -71,37 +79,29 @@ def node_escalate(state: ReviewState) -> dict:
         # fallback when the LLM didn't generate any questions
         questions = ["What is the intent of this PR?", "Any migration concerns?"]
 
-    # TODO: call interrupt(payload) where payload kind="escalation" contains:
-    #       pr_url, confidence, confidence_reasoning, summary, risk_factors, questions.
-    # answers = interrupt({...})
-    # return {"escalation_answers": answers}
-    raise NotImplementedError("Call interrupt() with an escalation payload")
+    answers = interrupt({"kind": "escalation", "pr_url": state["pr_url"],
+        "confidence": a.confidence, "confidence_reasoning": a.confidence_reasoning,
+        "summary": a.summary, "risk_factors": a.risk_factors, "questions": questions})
+    return {"escalation_answers": answers}
 
 
 def node_synthesize(state: ReviewState) -> dict:
     """Re-prompt LLM with the reviewer's answers and produce a refined review."""
-    # TODO:
-    #   - read state["escalation_answers"] (dict[question, answer])
-    #   - call get_llm().with_structured_output(PRAnalysis).invoke(...) with a prompt
-    #     containing the original diff + initial analysis + Q&A.
-    #   - return {"analysis": refined}
-    # `node_commit` will then post the refined review to the PR.
-    raise NotImplementedError("Synthesize a refined PRAnalysis using the reviewer answers")
+    import json
+    refined = get_llm().with_structured_output(PRAnalysis).invoke([
+        {"role": "system", "content": REVIEW_PROMPT + " Refine the initial review using the answers."},
+        {"role": "user", "content": f"Diff:\n{state['pr_diff']}\nInitial review: {state['analysis'].model_dump_json()}\nAnswers: {json.dumps(state.get('escalation_answers'))}"},
+    ])
+    return {"analysis": refined}
 
 
 def node_human_approval(state):
-    a = state["analysis"]
-    response = interrupt({
-        "kind": "approval_request", "pr_url": state["pr_url"],
-        "confidence": a.confidence, "confidence_reasoning": a.confidence_reasoning,
-        "summary": a.summary,
-        "comments": [c.model_dump() for c in a.comments],
-        "diff_preview": state["pr_diff"][:2000],
-    })
-    return {"human_choice": response.get("choice"), "human_feedback": response.get("feedback")}
+    return validate_choice(interrupt(approval_payload(state)))
 
 
 def _render_comment_body(state) -> str:
+    if state.get("human_choice") == "edit":
+        return state["human_feedback"]
     a = state["analysis"]
     lines = [f"### Automated review (confidence {a.confidence:.0%})", "", a.summary, ""]
     for c in a.comments:
@@ -127,12 +127,7 @@ def _post(state, label: str) -> str:
 
 def node_commit(state):
     console.print("[cyan]→ commit[/cyan]")
-    # Two paths converge here:
-    #   1. human_approval → commit (only post if approved)
-    #   2. escalate → synthesize → commit (always post the refined review)
-    if state.get("escalation_answers"):
-        return {"final_action": _post(state, "committed_after_escalation")}
-    if state.get("human_choice") == "approve":
+    if state.get("human_choice") in {"approve", "edit"}:
         return {"final_action": _post(state, "committed")}
     console.print(f"  [yellow]·[/yellow] skipping comment (choice={state.get('human_choice')})")
     return {"final_action": "rejected"}
@@ -161,27 +156,33 @@ def build_graph():
     g.add_edge("auto_approve", END)
     g.add_edge("human_approval", "commit")
     g.add_edge("commit", END)
-    # TODO: wire escalate → synthesize → commit  (commit already → END)
+    g.add_edge("escalate", "synthesize")
+    g.add_edge("synthesize", "human_approval")
     return g.compile(checkpointer=MemorySaver())
 
 
 def handle_interrupt(payload):
     kind = payload["kind"]
     if kind == "approval_request":
-        console.print(Panel.fit(
-            payload["summary"],
-            title=f"Approve? conf={payload['confidence']:.0%}",
-            border_style="green",
-        ))
-        choice = console.input("approve/reject/edit? ").strip().lower()
-        return {"choice": choice, "feedback": console.input("Feedback: ").strip()}
+        from exercises.exercise_2_hitl import prompt_human
+        return prompt_human(payload)
     if kind == "escalation":
         console.print(Panel.fit(
             payload["summary"],
             title=f"Escalation conf={payload['confidence']:.0%}",
             border_style="yellow",
         ))
-        return {q: console.input(f"Q: {q}\nA: ").strip() for q in payload["questions"]}
+        console.print(payload["confidence_reasoning"])
+        for risk in payload.get("risk_factors", []):
+            console.print(f"Risk: {risk}", markup=False)
+        answers = {}
+        for question in payload["questions"]:
+            answer = ""
+            while not answer:
+                console.print(question, markup=False)
+                answer = console.input("Answer: ").strip()
+            answers[question] = answer
+        return answers
     raise ValueError(kind)
 
 
